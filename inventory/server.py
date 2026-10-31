@@ -12,7 +12,7 @@ from .validation import headers, request as validate_request
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
 from urllib.parse import urlparse
-from .core import Store, read_csv
+from .core import Store, read_csv, capacity_plan
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -113,9 +113,10 @@ class Handler(BaseHTTPRequestHandler):
                     items = read_csv(raw, encoding, columns)
                     digest = hashlib.sha256(raw).hexdigest()
                     duplicates = [x['id'] for x in store.list() if x['source_hash'] == digest]
-                    return self.reply(200, {'items': items[:100], 'count': len(items), 'duplicates': duplicates})
+                    plan = capacity_plan(len(items), request['locations'], request.get('correction_reserve')) if 'locations' in request else None
+                    return self.reply(200, {'items': items[:100], 'count': len(items), 'duplicates': duplicates, 'capacity': plan})
                 def operation():
-                    s = store.create(raw, request.get('locations'), request['actor'], encoding, columns, request.get('source_name', ''))
+                    s = store.create(raw, request.get('locations'), request['actor'], encoding, columns, request.get('source_name', ''), request.get('correction_reserve'))
                     return {'id': s['id']}
             else:
                 def operation():

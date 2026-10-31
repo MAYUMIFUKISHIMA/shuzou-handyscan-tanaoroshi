@@ -63,6 +63,25 @@ def read_csv(raw, encoding='utf-8-sig', columns=None):
     return result
 
 
+def capacity_plan(item_count, locations, reserve=None):
+    if not isinstance(locations, list) or not 0 < len(locations) <= MAX_LOCATIONS:
+        raise ValueError('区画は1〜20件の配列が必要です')
+    for loc in locations:
+        text(loc, '区画')
+        if loc != loc.strip():
+            raise ValueError('区画の前後に空白は使用できません')
+    if len(set(locations)) != len(locations):
+        raise ValueError('区画が重複しています')
+    initial = item_count * len(locations)
+    # Prototype default allows one complete recount. D05 must approve production limits.
+    reserve = initial if reserve is None else reserve
+    if type(reserve) is not int or reserve < 1:
+        raise ValueError('訂正・再棚卸の追加件数は1以上の整数で指定してください')
+    if initial + reserve > MAX_RECORDS:
+        raise ValueError(f'初回{initial}件＋訂正予約{reserve}件が保存上限{MAX_RECORDS}件を超えます。対象範囲を見直してください')
+    return dict(initial=initial, reserve=reserve, required=initial+reserve, limit=MAX_RECORDS)
+
+
 class Store:
     def __init__(self, path):
         self.db = sqlite3.connect(path, timeout=1)
@@ -120,7 +139,7 @@ class Store:
     def list(self):
         return [self.decode(r['body']) for r in self.db.execute('SELECT body FROM sessions ORDER BY rowid DESC')]
 
-    def create(self, raw, locations, actor, encoding='utf-8-sig', columns=None, source_name=''):
+    def create(self, raw, locations, actor, encoding='utf-8-sig', columns=None, source_name='', correction_reserve=None):
         items = read_csv(raw, encoding, columns)
         text(actor, '担当者')
         text(source_name, 'ファイル名', 255, empty=True)
@@ -128,10 +147,11 @@ class Store:
             raise ValueError('担当者と重複のない区画を指定してください')
         for loc in locations:
             text(loc, '区画')
+        plan = capacity_plan(len(items), locations, correction_reserve)
         sid = str(uuid.uuid4())
         s = dict(id=sid, state='counting', revision=0, source_hash=hashlib.sha256(raw).hexdigest(),
                  encoding=encoding, columns=columns, source_name=source_name, items=items, locations=locations,
-                 records=[], completed=[], audit=[dict(action='create', actor=actor, time=now())])
+                 capacity=plan, created_at=now(), result_version=0, mode='prototype', records=[], completed=[], audit=[dict(action='create', actor=actor, time=now())])
         with self.transaction():
             self.db.execute('INSERT INTO sessions VALUES (?,?)', (sid, json.dumps(s, ensure_ascii=False)))
             self.db.execute('INSERT INTO sources VALUES (?,?)', (sid, raw))
@@ -196,6 +216,8 @@ class Store:
                     raise ValueError('未棚卸または競合があります')
                 if location not in s['completed']:
                     s['completed'].append(location)
+                if set(s['completed']) == set(s['locations']):
+                    s['state'] = 'reviewing'
             elif action == 'finalize':
                 self._editable(s)
                 if any(x['status'] == 'open' for x in s.get('held', [])):
@@ -205,6 +227,9 @@ class Store:
                 rows = self.summary(s)
                 if any(r['count'] is None for r in rows):
                     raise ValueError('未棚卸または競合があります')
+                s['result_version'] = s.get('result_version', 0) + 1
+                s['finalized_by'] = actor
+                s['finalized_at'] = now()
                 s['result'] = rows
                 s['state'] = 'finalized'
             elif action == 'reopen':
@@ -213,7 +238,7 @@ class Store:
                 if not isinstance(payload, dict) or set(payload) != {'reason'}:
                     raise ValueError('訂正理由が必要です')
                 text(payload['reason'], '訂正理由', 512)
-                s.setdefault('previous_results', []).append(dict(result=s.pop('result'), reason=payload['reason'], actor=actor, time=now()))
+                s.setdefault('previous_results', []).append(dict(result=s.pop('result'), version=s.get('result_version', 0), finalized_by=s.get('finalized_by'), finalized_at=s.get('finalized_at'), reason=payload['reason'], actor=actor, time=now()))
                 s['state'] = 'counting'
                 s['completed'] = []
             elif action == 'export':
@@ -225,6 +250,7 @@ class Store:
                     writer.writerow(['商品番号', '名称', '基準数量', '実数', '差異'])
                     writer.writerows([r[k] for k in ('code','name','baseline','count','difference')] for r in s['result'])
                     s['csv'] = out.getvalue()
+                    s['export_manifest'] = dict(session_id=sid, result_version=s.get('result_version', 0), kind='confirmation_only', created_by=actor, created_at=now(), count=len(s['result']))
                     s['export_hash'] = hashlib.sha256(s['csv'].encode('utf-8-sig')).hexdigest()
                 s['state'] = 'exported'
             else:
@@ -236,7 +262,7 @@ class Store:
 
     @staticmethod
     def _editable(s):
-        if s['state'] != 'counting':
+        if s['state'] not in ('counting', 'reviewing'):
             raise ValueError('確定後は変更できません')
 
     def _receive(self, s, records):
@@ -269,6 +295,7 @@ class Store:
             if r['supersedes'] and set(r['supersedes']) != {x['id'] for x in active}:
                 raise ValueError('訂正元が最新ではありません。競合を確認してください')
             s['records'].append(r)
+            s['state'] = 'counting'
             if r['location'] in s['completed']:
                 s['completed'].remove(r['location'])
 

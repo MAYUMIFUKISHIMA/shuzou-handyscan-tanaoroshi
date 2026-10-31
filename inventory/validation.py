@@ -40,8 +40,10 @@ def request(body):
         raise ValueError('未対応の操作です')
     if action in ('inspect','preview','create'):
         allowed = {'action','csv','encoding','columns','source_name'}
+        if action == 'preview':
+            allowed |= {'locations','correction_reserve'}
         if action == 'create':
-            allowed |= {'actor','locations','request_id'}
+            allowed |= {'actor','locations','request_id','correction_reserve'}
         if not isinstance(body.get('csv'), str) or not body['csv'].isascii():
             raise ValueError('CSVはBase64文字列が必要です')
     else:

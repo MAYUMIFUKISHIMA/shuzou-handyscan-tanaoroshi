@@ -20,6 +20,7 @@ const assert=require('node:assert/strict');
   await page.locator('#actor').fill('現場担当A');
   const csv={name:'custom.csv',mimeType:'text/csv',buffer:Buffer.from('資材番号,資材名,在庫数\n000001,架空の発送箱,10\n000002,架空のラベル,20\n000003,架空の緩衝材,0\n')};await page.locator('#file').setInputFiles(csv);await page.locator('#inspect').click();await idle();
   await page.locator('#map-code').selectOption('資材番号');await page.locator('#map-name').selectOption('資材名');await page.locator('#map-baseline').selectOption('在庫数');
+  await page.locator('#reserve').fill('20000');await page.locator('#preview').click();await page.waitForFunction(()=>document.querySelector('#message').textContent.includes('超えます'));assert.ok(await page.locator('#create').isDisabled());await page.locator('#reserve').fill('');
   await page.locator('#preview').click();await page.waitForFunction(()=>!document.querySelector('#create').disabled);
   await page.locator('#save-profile').click();await idle();
   assert.ok(await page.evaluate(()=>localStorage.getItem('inventory.csv-profile.v1')));
