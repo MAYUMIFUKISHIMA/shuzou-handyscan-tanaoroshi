@@ -1,0 +1,1 @@
+"""CSV-independent stocktake prototype."""
