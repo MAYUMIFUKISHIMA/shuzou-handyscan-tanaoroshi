@@ -18,7 +18,7 @@ AGENTS.md                                 共通の開発ルール
 docs/design.md                            基本設計と確認待ち事項
 docs/status.md                            現在地と次の作業
 docs/skills.md                            skillの共有・導入方針
-.agents/skills/inventory-development/      バージョン管理するプロジェクトskill
+.agents/skills/                            全5件の共有プロジェクトskill
 ```
 
 実データCSV、資格情報、端末固有設定はコミットしない。将来のテスト用CSVには架空データを使う。

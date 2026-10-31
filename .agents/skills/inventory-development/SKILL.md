@@ -9,6 +9,10 @@ description: 売りexのCSVとBT-W250を連携する出荷資材棚卸システ�
 
 リポジトリルートのAGENTS.md、docs/status.md、docs/design.mdを読む。現在のGit状態を確認し、既存変更を保護する。既存チェックアウトを使い、依頼なしにworktreeを作らない。
 
+## 作業別skill
+
+CSVは `../csv-integration/SKILL.md`、棚卸処理は `../stocktake-domain/SKILL.md`、端末は `../handy-terminal-development/SKILL.md`、検証は `../inventory-testing/SKILL.md` を必要に応じて読む。全skillの一覧と依存条件はdocs/skills.mdを参照する。
+
 ## 実装と設計
 
 1. 基本設計のERPNext・Odoo・InvenTree参照と採用方針を確認する。類似機能を一から独自設計する前に、対応する既存実装を調べる。
