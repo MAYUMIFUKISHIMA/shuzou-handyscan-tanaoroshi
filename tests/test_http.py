@@ -1,5 +1,6 @@
 import base64
 import json
+import uuid
 import tempfile
 import threading
 import unittest
@@ -17,6 +18,8 @@ class HttpTests(unittest.TestCase):
             def get():
                 with urllib.request.urlopen(root+'/api') as r:return json.load(r)
             def post(data,token):
+                if data.get('action') not in ('inspect','preview'):
+                    data.setdefault('request_id',str(uuid.uuid4()))
                 req=urllib.request.Request(root+'/api',data=json.dumps(data).encode(),headers={'Content-Type':'application/json','X-Token':token})
                 with urllib.request.urlopen(req) as r:return json.load(r)
             try:

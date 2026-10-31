@@ -6,6 +6,8 @@ import json
 import re
 import sqlite3
 import uuid
+from contextlib import contextmanager
+from .validation import text, headers, MAX_ITEMS, MAX_RECORDS, MAX_BATCH, MAX_LOCATIONS
 from datetime import datetime, timezone
 from decimal import Decimal
 
@@ -15,7 +17,7 @@ def now():
 
 
 def quantity(value, negative=False):
-    if not isinstance(value, str) or not re.fullmatch(r'-?\d{1,12}(\.\d{1,6})?', value):
+    if not isinstance(value, str) or not re.fullmatch(r'-?[0-9]{1,12}(\.[0-9]{1,6})?', value):
         raise ValueError('数量は12桁以内、小数6桁以内の数値文字列で指定してください')
     n = Decimal(value)
     if n < 0 and not negative:
@@ -24,10 +26,9 @@ def quantity(value, negative=False):
 
 
 def read_csv(raw, encoding='utf-8-sig', columns=None):
-    if encoding not in ('utf-8-sig', 'cp932'):
-        raise ValueError('未対応の文字コードです')
-    columns = columns or {'code': '商品番号', 'name': '名称', 'baseline': '数量'}
-    if set(columns) != {'code', 'name', 'baseline'} or len(set(columns.values())) != 3:
+    headers(raw, encoding)
+    columns = columns if columns is not None else {'code': '商品番号', 'name': '名称', 'baseline': '数量'}
+    if not isinstance(columns, dict) or any(not isinstance(v, str) for v in columns.values()) or set(columns) != {'code', 'name', 'baseline'} or len(set(columns.values())) != 3:
         raise ValueError('列対応が不正です')
     reader = csv.DictReader(io.StringIO(raw.decode(encoding), newline=''), strict=True)
     if not reader.fieldnames or len(set(reader.fieldnames)) != len(reader.fieldnames):
@@ -35,11 +36,15 @@ def read_csv(raw, encoding='utf-8-sig', columns=None):
     if not set(columns.values()) <= set(reader.fieldnames):
         raise ValueError('必要な列がありません')
     result, seen, errors = [], set(), []
-    for row in reader:
+    for number, row in enumerate(reader, 1):
+        if number > MAX_ITEMS:
+            raise ValueError('CSVは5000件以内にしてください')
         try:
             if None in row or any(v is None for v in row.values()):
                 raise ValueError('列数が一致しません')
             item = {key: row[col] for key, col in columns.items()}
+            text(item['code'], '商品番号')
+            text(item['name'], '名称', 512)
             if not item['code'] or not item['name'] or item['code'] != item['code'].strip():
                 raise ValueError('商品番号・名称が空、または番号の前後に空白があります')
             if item['code'] in seen:
@@ -49,6 +54,8 @@ def read_csv(raw, encoding='utf-8-sig', columns=None):
             result.append(item)
         except ValueError as exc:
             errors.append(f'{reader.line_num}行: {exc}')
+            if len(errors) >= 100:
+                raise ValueError('\n'.join(errors) + '\nエラー100件で検証を中断しました')
     if errors:
         raise ValueError('\n'.join(errors))
     if not result:
@@ -58,12 +65,38 @@ def read_csv(raw, encoding='utf-8-sig', columns=None):
 
 class Store:
     def __init__(self, path):
-        self.db = sqlite3.connect(path)
+        self.db = sqlite3.connect(path, timeout=1)
         self.db.row_factory = sqlite3.Row
-        self.db.executescript('''
-        CREATE TABLE IF NOT EXISTS sessions(id TEXT PRIMARY KEY, body TEXT NOT NULL);
-        CREATE TABLE IF NOT EXISTS sources(id TEXT PRIMARY KEY, raw BLOB NOT NULL);
-        ''')
+        try:
+            self.db.executescript('''
+            CREATE TABLE IF NOT EXISTS sessions(id TEXT PRIMARY KEY, body TEXT NOT NULL);
+            CREATE TABLE IF NOT EXISTS sources(id TEXT PRIMARY KEY, raw BLOB NOT NULL);
+            CREATE TABLE IF NOT EXISTS receipts(id TEXT PRIMARY KEY, fingerprint TEXT NOT NULL, result TEXT NOT NULL);
+            ''')
+        except sqlite3.Error:
+            self.db.close()
+            raise
+
+    @contextmanager
+    def transaction(self):
+        if self.db.in_transaction:
+            yield
+        else:
+            with self.db:
+                self.db.execute('BEGIN IMMEDIATE')
+                yield
+
+    def execute_once(self, request, operation):
+        fingerprint = hashlib.sha256(json.dumps(request, sort_keys=True, ensure_ascii=False).encode()).hexdigest()
+        with self.transaction():
+            row = self.db.execute('SELECT * FROM receipts WHERE id=?', (request['request_id'],)).fetchone()
+            if row:
+                if row['fingerprint'] != fingerprint:
+                    raise ValueError('再送識別IDが同じで内容が異なります')
+                return json.loads(row['result'])
+            result = operation()
+            self.db.execute('INSERT INTO receipts VALUES (?,?,?)', (request['request_id'], fingerprint, json.dumps(result)))
+            return result
 
     def close(self):
         self.db.close()
@@ -72,45 +105,101 @@ class Store:
         row = self.db.execute('SELECT body FROM sessions WHERE id=?', (sid,)).fetchone()
         if row is None:
             raise ValueError('棚卸がありません')
-        return json.loads(row['body'])
+        return self.decode(row['body'])
+
+    @staticmethod
+    def decode(body):
+        try:
+            value = json.loads(body)
+            if not isinstance(value, dict) or not {'id','state','revision','items','records','locations','completed','audit'} <= value.keys():
+                raise ValueError('invalid stored session')
+            return value
+        except (ValueError, TypeError) as exc:
+            raise sqlite3.DatabaseError('保存データが不正です') from exc
 
     def list(self):
-        return [json.loads(r['body']) for r in self.db.execute('SELECT body FROM sessions ORDER BY rowid DESC')]
+        return [self.decode(r['body']) for r in self.db.execute('SELECT body FROM sessions ORDER BY rowid DESC')]
 
     def create(self, raw, locations, actor, encoding='utf-8-sig', columns=None, source_name=''):
         items = read_csv(raw, encoding, columns)
-        if not actor or not locations or len(set(locations)) != len(locations) or any(not x.strip() for x in locations):
+        text(actor, '担当者')
+        text(source_name, 'ファイル名', 255, empty=True)
+        if not isinstance(locations, list) or not 0 < len(locations) <= MAX_LOCATIONS or any(not isinstance(x, str) for x in locations) or len(set(locations)) != len(locations) or any(not x.strip() for x in locations):
             raise ValueError('担当者と重複のない区画を指定してください')
+        for loc in locations:
+            text(loc, '区画')
         sid = str(uuid.uuid4())
         s = dict(id=sid, state='counting', revision=0, source_hash=hashlib.sha256(raw).hexdigest(),
                  encoding=encoding, columns=columns, source_name=source_name, items=items, locations=locations,
                  records=[], completed=[], audit=[dict(action='create', actor=actor, time=now())])
-        with self.db:
+        with self.transaction():
             self.db.execute('INSERT INTO sessions VALUES (?,?)', (sid, json.dumps(s, ensure_ascii=False)))
             self.db.execute('INSERT INTO sources VALUES (?,?)', (sid, raw))
         return s
 
     def change(self, sid, revision, action, actor, payload):
-        if not actor or not isinstance(actor, str):
-            raise ValueError('担当者が必要です')
-        with self.db:
-            self.db.execute('BEGIN IMMEDIATE')
+        text(actor, '担当者')
+        text(sid, '棚卸ID')
+        if type(revision) is not int or revision < 0:
+            raise ValueError('revisionは非負整数です')
+        with self.transaction():
             s = self.load(sid)
             if revision != s['revision']:
                 raise ValueError('別の操作で更新されています。再読込してください')
             if action == 'receive':
                 self._receive(s, payload)
+            elif action == 'hold':
+                self._editable(s)
+                required = {'id','device','code','location','quantity','operator'}
+                if not isinstance(payload, dict) or set(payload) != required:
+                    raise ValueError('保留記録の項目が不正です')
+                for key in required:
+                    text(payload[key], key)
+                quantity(payload['quantity'])
+                if payload['location'] not in s['locations']:
+                    raise ValueError('区画がありません')
+                if payload['code'] in {i['code'] for i in s['items']}:
+                    raise ValueError('登録済み商品は通常の記録を使用してください')
+                held = s.setdefault('held', [])
+                if len(held) >= MAX_BATCH or any(x['id'] == payload['id'] for x in held):
+                    raise ValueError('保留IDの重複または上限です')
+                held.append(dict(payload, status='open', time=now()))
+            elif action in ('resolve', 'dismiss'):
+                self._editable(s)
+                expected = {'id','reason','record'} if action == 'resolve' else {'id','reason'}
+                if not isinstance(payload, dict) or set(payload) != expected:
+                    raise ValueError('保留処理の項目が不正です')
+                text(payload['reason'], '処理理由', 512)
+                held = next((x for x in s.get('held', []) if x['id'] == payload['id'] and x['status'] == 'open'), None)
+                if held is None:
+                    raise ValueError('未解決の保留がありません')
+                if action == 'resolve':
+                    record = payload['record']
+                    if not isinstance(record, dict) or record.get('location') != held['location'] or record.get('quantity') != held['quantity']:
+                        raise ValueError('保留の区画・数量を保持してください')
+                    self._receive(s, [record])
+                    held['resolved_record'] = record['id']
+                held.update(status=action, reason=payload['reason'], resolved_by=actor, resolved_at=now())
             elif action == 'complete':
                 self._editable(s)
+                if not isinstance(payload, dict) or set(payload) != {'location'}:
+                    raise ValueError('区画を指定してください')
                 location = payload['location']
                 if location not in s['locations']:
                     raise ValueError('区画がありません')
-                for item in s['items']:
-                    self._cell(s, item['code'], location, required=True)
+                superseded = {i for r in s['records'] for i in r['supersedes']}
+                counts = {}
+                for r in s['records']:
+                    if r['location'] == location and r['id'] not in superseded:
+                        counts[r['code']] = counts.get(r['code'], 0) + 1
+                if any(counts.get(item['code'], 0) != 1 for item in s['items']):
+                    raise ValueError('未棚卸または競合があります')
                 if location not in s['completed']:
                     s['completed'].append(location)
             elif action == 'finalize':
                 self._editable(s)
+                if any(x['status'] == 'open' for x in s.get('held', [])):
+                    raise ValueError('未解決のバーコードがあります')
                 if set(s['completed']) != set(s['locations']):
                     raise ValueError('全区画の完了確認が必要です')
                 rows = self.summary(s)
@@ -118,6 +207,15 @@ class Store:
                     raise ValueError('未棚卸または競合があります')
                 s['result'] = rows
                 s['state'] = 'finalized'
+            elif action == 'reopen':
+                if s['state'] != 'finalized':
+                    raise ValueError('出力済みの訂正は外部取り込み状況の確認が必要です')
+                if not isinstance(payload, dict) or set(payload) != {'reason'}:
+                    raise ValueError('訂正理由が必要です')
+                text(payload['reason'], '訂正理由', 512)
+                s.setdefault('previous_results', []).append(dict(result=s.pop('result'), reason=payload['reason'], actor=actor, time=now()))
+                s['state'] = 'counting'
+                s['completed'] = []
             elif action == 'export':
                 if s['state'] not in ('finalized', 'exported'):
                     raise ValueError('確定が必要です')
@@ -142,7 +240,7 @@ class Store:
             raise ValueError('確定後は変更できません')
 
     def _receive(self, s, records):
-        if not isinstance(records, list) or not records:
+        if not isinstance(records, list) or not 0 < len(records) <= MAX_BATCH:
             raise ValueError('記録の配列が必要です')
         for r in records:
             required = {'id','device','code','location','quantity','operator','supersedes'}
@@ -152,12 +250,18 @@ class Store:
                 raise ValueError('記録の必須文字列が空です')
             if not isinstance(r['supersedes'], list) or any(not isinstance(x, str) for x in r['supersedes']):
                 raise ValueError('訂正元はIDの配列です')
+            for key in required - {'supersedes'}:
+                text(r[key], key)
+            if len(r['supersedes']) > MAX_BATCH or len(set(r['supersedes'])) != len(r['supersedes']):
+                raise ValueError('訂正元が重複または多すぎます')
             old = next((x for x in s['records'] if x['id'] == r['id']), None)
             if old:
                 if old != r:
                     raise ValueError('同じ記録IDで内容が異なります')
                 continue
             self._editable(s)
+            if len(s['records']) >= MAX_RECORDS:
+                raise ValueError('記録数の上限20000件です')
             quantity(r['quantity'])
             if r['code'] not in [x['code'] for x in s['items']] or r['location'] not in s['locations']:
                 raise ValueError('未登録商品または区画です')
@@ -184,8 +288,14 @@ class Store:
 
     def summary(self, s):
         rows = []
+        superseded = {i for r in s['records'] for i in r['supersedes']}
+        cells = {}
+        for r in s['records']:
+            if r['id'] not in superseded:
+                cells.setdefault((r['code'], r['location']), []).append(Decimal(r['quantity']))
         for item in s['items']:
-            values = [self._cell(s, item['code'], loc) for loc in s['locations']]
+            groups = [cells.get((item['code'], loc), []) for loc in s['locations']]
+            values = [v[0] if len(v) == 1 else None for v in groups]
             count = sum(values, Decimal(0)) if all(x is not None for x in values) else None
             rows.append(dict(item, count=None if count is None else str(count),
                              difference=None if count is None else str(count - Decimal(item['baseline']))))

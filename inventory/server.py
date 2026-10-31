@@ -6,6 +6,9 @@ import json
 import io
 import hashlib
 import secrets
+import sqlite3
+import socket
+from .validation import headers, request as validate_request
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
 from urllib.parse import urlparse
@@ -24,7 +27,37 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(data)
 
+    def setup(self):
+        super().setup()
+        self.connection.settimeout(10)
+
+    def failure(self, exc):
+        if isinstance(exc, sqlite3.Error):
+            message = 'DBの保存・読込に失敗しました。容量・権限・ロックを確認し、復旧後に同じ操作を再送してください。破損の場合はバックアップから復旧してください。'
+            status = 503
+        elif isinstance(exc, OSError):
+            message = 'ファイルまたは通信に失敗しました。保存結果を確認し、同じ操作を再送してください。'
+            status = 503
+        else:
+            message = str(exc)
+            status = 400
+        try:
+            self.reply(status, {'error': message})
+        except OSError:
+            pass
+
+    def valid_host(self):
+        return self.headers.get('Host') == f'127.0.0.1:{self.server.server_port}'
+
     def do_GET(self):
+        if not self.valid_host():
+            return self.reply(403, {'error': '接続先ホストが不正です'})
+        try:
+            self.get()
+        except (sqlite3.Error, OSError, ValueError) as exc:
+            self.failure(exc)
+
+    def get(self):
         path = urlparse(self.path).path
         if path in ('/', '/app.js', '/style.css'):
             file = {'/': 'index.html', '/app.js': 'app.js', '/style.css': 'style.css'}[path]
@@ -44,40 +77,56 @@ class Handler(BaseHTTPRequestHandler):
     def do_POST(self):
         origin = self.headers.get('Origin')
         expected = f'http://127.0.0.1:{self.server.server_port}'
-        if self.headers.get('X-Token') != self.server.token or (origin and origin != expected):
+        if not self.valid_host() or self.headers.get('X-Token') != self.server.token or (origin and origin != expected):
             return self.reply(403, {'error': 'ページを再読込してください'})
         if self.path != '/api' or self.headers.get('Content-Type') != 'application/json':
             return self.reply(400, {'error': 'Invalid request'})
-        store = Store(self.server.db_path)
+        store = None
         try:
+            if self.headers.get('Transfer-Encoding') or len(self.headers.get_all('Content-Length', [])) != 1:
+                raise ValueError('Content-Lengthを一つ指定してください')
             size = int(self.headers.get('Content-Length', '0'))
             if not 0 < size <= 2_000_000:
                 raise ValueError('リクエストは2MB以内です')
-            request = json.loads(self.rfile.read(size))
+            raw_body = self.rfile.read(size)
+            if len(raw_body) != size:
+                raise ValueError('受信が途中で終了しました')
+            def unique_pairs(pairs):
+                result = {}
+                for key, value in pairs:
+                    if key in result:
+                        raise ValueError('JSONの項目が重複しています')
+                    result[key] = value
+                return result
+            def invalid_constant(value):
+                raise ValueError('非有限JSON数値は使用できません')
+            request = validate_request(json.loads(raw_body, object_pairs_hook=unique_pairs, parse_constant=invalid_constant))
+            store = Store(self.server.db_path)
             if request['action'] in ('inspect', 'preview', 'create'):
                 raw = base64.b64decode(request['csv'], validate=True)
                 encoding = request.get('encoding', 'utf-8-sig')
-                if encoding not in ('utf-8-sig', 'cp932'):
-                    raise ValueError('未対応の文字コードです')
+                fields = headers(raw, encoding)
                 if request['action'] == 'inspect':
-                    headers = next(csv.reader(io.StringIO(raw.decode(encoding)), strict=True), [])
-                    if not headers or len(set(headers)) != len(headers) or any(not x for x in headers):
-                        raise ValueError('ヘッダーが空または重複しています')
-                    return self.reply(200, {'headers': headers})
+                    return self.reply(200, {'headers': fields})
                 columns = request.get('columns')
                 if request['action'] == 'preview':
                     items = read_csv(raw, encoding, columns)
                     digest = hashlib.sha256(raw).hexdigest()
                     duplicates = [x['id'] for x in store.list() if x['source_hash'] == digest]
                     return self.reply(200, {'items': items[:100], 'count': len(items), 'duplicates': duplicates})
-                s = store.create(raw, request['locations'], request['actor'], encoding, columns, request.get('source_name', ''))
+                def operation():
+                    s = store.create(raw, request.get('locations'), request['actor'], encoding, columns, request.get('source_name', ''))
+                    return {'id': s['id']}
             else:
-                s = store.change(request['id'], request['revision'], request['action'], request['actor'], request.get('payload'))
-            self.reply(200, {'id': s['id']})
-        except (ValueError, KeyError, TypeError, UnicodeError, csv.Error) as exc:
-            self.reply(400, {'error': str(exc)})
+                def operation():
+                    s = store.change(request['id'], request['revision'], request['action'], request['actor'], request.get('payload'))
+                    return {'id': s['id']}
+            self.reply(200, store.execute_once(request, operation))
+        except (ValueError, KeyError, TypeError, UnicodeError, csv.Error, sqlite3.Error, OSError, RecursionError) as exc:
+            self.failure(exc)
         finally:
-            store.close()
+            if store is not None:
+                store.close()
 
 
 def serve(path, port):
