@@ -3,11 +3,13 @@ import argparse
 import base64
 import csv
 import json
+import io
+import hashlib
 import secrets
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
 from urllib.parse import urlparse
-from .core import Store
+from .core import Store, read_csv
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -52,8 +54,23 @@ class Handler(BaseHTTPRequestHandler):
             if not 0 < size <= 2_000_000:
                 raise ValueError('リクエストは2MB以内です')
             request = json.loads(self.rfile.read(size))
-            if request['action'] == 'create':
-                s = store.create(base64.b64decode(request['csv'], validate=True), request['locations'], request['actor'], request.get('encoding', 'utf-8-sig'))
+            if request['action'] in ('inspect', 'preview', 'create'):
+                raw = base64.b64decode(request['csv'], validate=True)
+                encoding = request.get('encoding', 'utf-8-sig')
+                if encoding not in ('utf-8-sig', 'cp932'):
+                    raise ValueError('未対応の文字コードです')
+                if request['action'] == 'inspect':
+                    headers = next(csv.reader(io.StringIO(raw.decode(encoding)), strict=True), [])
+                    if not headers or len(set(headers)) != len(headers) or any(not x for x in headers):
+                        raise ValueError('ヘッダーが空または重複しています')
+                    return self.reply(200, {'headers': headers})
+                columns = request.get('columns')
+                if request['action'] == 'preview':
+                    items = read_csv(raw, encoding, columns)
+                    digest = hashlib.sha256(raw).hexdigest()
+                    duplicates = [x['id'] for x in store.list() if x['source_hash'] == digest]
+                    return self.reply(200, {'items': items[:100], 'count': len(items), 'duplicates': duplicates})
+                s = store.create(raw, request['locations'], request['actor'], encoding, columns, request.get('source_name', ''))
             else:
                 s = store.change(request['id'], request['revision'], request['action'], request['actor'], request.get('payload'))
             self.reply(200, {'id': s['id']})

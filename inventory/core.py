@@ -24,6 +24,8 @@ def quantity(value, negative=False):
 
 
 def read_csv(raw, encoding='utf-8-sig', columns=None):
+    if encoding not in ('utf-8-sig', 'cp932'):
+        raise ValueError('未対応の文字コードです')
     columns = columns or {'code': '商品番号', 'name': '名称', 'baseline': '数量'}
     if set(columns) != {'code', 'name', 'baseline'} or len(set(columns.values())) != 3:
         raise ValueError('列対応が不正です')
@@ -75,13 +77,13 @@ class Store:
     def list(self):
         return [json.loads(r['body']) for r in self.db.execute('SELECT body FROM sessions ORDER BY rowid DESC')]
 
-    def create(self, raw, locations, actor, encoding='utf-8-sig', columns=None):
+    def create(self, raw, locations, actor, encoding='utf-8-sig', columns=None, source_name=''):
         items = read_csv(raw, encoding, columns)
         if not actor or not locations or len(set(locations)) != len(locations) or any(not x.strip() for x in locations):
             raise ValueError('担当者と重複のない区画を指定してください')
         sid = str(uuid.uuid4())
         s = dict(id=sid, state='counting', revision=0, source_hash=hashlib.sha256(raw).hexdigest(),
-                 encoding=encoding, columns=columns, items=items, locations=locations,
+                 encoding=encoding, columns=columns, source_name=source_name, items=items, locations=locations,
                  records=[], completed=[], audit=[dict(action='create', actor=actor, time=now())])
         with self.db:
             self.db.execute('INSERT INTO sessions VALUES (?,?)', (sid, json.dumps(s, ensure_ascii=False)))
