@@ -37,4 +37,4 @@ Python 3.12以上で `python -m inventory.server` を実行する。外部パッ
 
 [BT-W250の開発準備・PC模擬試験](docs/handheld/preparation.md)（SDKと端末向けビルドは確認待ち）
 
-[PCバーコードV1の実行手順と確認待ち](docs/v1-pc-pilot.md)
+[ハンディ棚卸V1の目標手順と確認待ち](docs/v1-pc-pilot.md)
