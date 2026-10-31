@@ -36,7 +36,7 @@ def request(body):
     if not isinstance(body, dict):
         raise ValueError('JSONオブジェクトが必要です')
     action = body.get('action')
-    if not isinstance(action, str) or action not in {'inspect','preview','create','receive','complete','finalize','export','reopen','hold','resolve','dismiss'}:
+    if not isinstance(action, str) or action not in {'inspect','preview','create','receive','complete','finalize','export','reopen','hold','resolve','dismiss','export_import'}:
         raise ValueError('未対応の操作です')
     if action in ('inspect','preview','create'):
         allowed = {'action','csv','encoding','columns','source_name'}

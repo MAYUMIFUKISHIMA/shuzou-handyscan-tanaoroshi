@@ -1,5 +1,7 @@
 """Transactional stocktake model. Quantities are decimal strings, never floats."""
 import csv
+import base64
+from .csv_export import render_import_csv
 import hashlib
 import io
 import json
@@ -241,6 +243,18 @@ class Store:
                 s.setdefault('previous_results', []).append(dict(result=s.pop('result'), version=s.get('result_version', 0), finalized_by=s.get('finalized_by'), finalized_at=s.get('finalized_at'), reason=payload['reason'], actor=actor, time=now()))
                 s['state'] = 'counting'
                 s['completed'] = []
+            elif action == 'export_import':
+                if s['state'] not in ('finalized','exported','exported_import'):
+                    raise ValueError('確定が必要です')
+                if s['state'] == 'exported_import':
+                    if s['import_artifact']['profile'] != payload:
+                        raise ValueError('出力済みの形式変更はできません。旧ファイルの取り込み状況を確認してください')
+                else:
+                    raw = render_import_csv(s['result'],payload)
+                    s['import_artifact'] = dict(profile=payload, data=base64.b64encode(raw).decode('ascii'),
+                        sha256=hashlib.sha256(raw).hexdigest(), result_version=s['result_version'],
+                        created_by=actor, created_at=now(), count=len(s['result']))
+                s['state'] = 'exported_import'
             elif action == 'export':
                 if s['state'] not in ('finalized', 'exported'):
                     raise ValueError('確定が必要です')

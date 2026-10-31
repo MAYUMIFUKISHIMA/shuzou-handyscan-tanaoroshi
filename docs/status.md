@@ -24,7 +24,7 @@
 
 ## 検証結果
 
-- `python -m unittest discover -s tests -v`: 全47件成功（HTTPを含む）。
+- `python -m unittest discover -s tests -v`: 全55件成功（HTTPを含む）。
 - `node --check inventory/app.js`: 成功。
 - `node tests/test_client.cjs`: 2件成功（通信失敗の同一再送、保存不可時の送信停止）。
 - 通常の制限付き実行ではソケット作成が拒否されたが、許可された実行でHTTP結合テストが成功した。
@@ -52,3 +52,7 @@
 公式サイトの調査はネットワーク許可先不足による403で停止。www.keyence.co.jp追加の環境設定下書きを保存済み（適用・公開は未実施）。SDK入手・端末方式選定・端末向けビルドは未完了。
 
 PC用模擬端末、配布/送信/受領契約、永続保存と再送の6テスト、模擬デモを追加。実機用アプリではない。詳細は[端末準備](handheld/preparation.md)、[未実施のビルド記録](handheld/build-record.md)、[実機試験票](handheld/device-test-plan.md)。A03は未完了のまま。
+
+## 当日PCバーコードV1
+
+ユーザー確認によりPC接続リーダーと売りex検証先を使用する経路を優先。読取末尾Enter→数量欄、数量Enter→保存/次読取、設定可能なCP932/UTF-8出力を追加。利用者回答で商品コード・商品名・棚卸実数の順、ヘッダーありを確認。正確な列名・文字コード・追加必須項目は未確認。元CSVから候補設定を作成できる。詳細は[v1-pc-pilot.md](v1-pc-pilot.md)。売りex反映・現場スキャナー検証は未実施。

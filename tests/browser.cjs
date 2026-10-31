@@ -25,19 +25,20 @@ const assert=require('node:assert/strict');
   await page.locator('#save-profile').click();await idle();
   assert.ok(await page.evaluate(()=>localStorage.getItem('inventory.csv-profile.v1')));
   await page.locator('#create').click();await idle();assert.equal(await page.locator('#rows tr').count(),3);
-  await page.locator('#code').fill('000001');await page.locator('#quantity').fill('8');
+  await page.locator('#code').fill('000001');await page.locator('#code').press('Enter');assert.ok(await page.locator('#quantity').evaluate(e=>e===document.activeElement));await page.locator('#quantity').fill('8');
   await page.reload();await idle();assert.equal(await page.locator('#quantity').inputValue(),'8');assert.equal(await page.locator('#actor').inputValue(),'現場担当A');
   await page.locator('#file').setInputFiles(csv);await page.locator('#inspect').click();await idle();assert.equal(await page.locator('#map-code').inputValue(),'資材番号');
   const other=await context.newPage();await other.goto(url);await other.waitForFunction(()=>document.querySelector('#tab-status').textContent.includes('ほかのタブ'));
   assert.ok(await other.locator('#save').isDisabled());assert.ok(await other.locator('#quantity').isDisabled());
   await other.close();
-  await page.locator('#save').click();await idle();assert.equal(await page.locator('#quantity').inputValue(),'');
+  await page.locator('#quantity').press('Enter');await idle();assert.equal(await page.locator('#quantity').inputValue(),'');assert.ok(await page.locator('#code').evaluate(e=>e===document.activeElement));
   for(const [code,qty] of [['000002','20'],['000003','0']]){await page.locator('#code').fill(code);await page.locator('#quantity').fill(qty);await page.locator('#save').click();await idle();}
   await page.locator('#filter').selectOption('difference');assert.equal(await page.locator('#rows tr').count(),1);
   await page.locator('#filter').selectOption('missing');assert.equal(await page.locator('#rows tr').count(),0);
   await page.locator('#filter').selectOption('all');await page.locator('#search').fill('ラベル');assert.equal(await page.locator('#rows tr').count(),1);await page.locator('#search').fill('');
   await page.locator('#complete').click();await idle();await page.locator('#finalize').click();await idle();
   const downloaded=page.waitForEvent('download');await page.locator('#export').click();const download=await downloaded;assert.ok(download.suggestedFilename().startsWith('確認用_'));await idle();
+  await page.getByText('売りex用CSVの出力設定',{exact:true}).click();await page.locator('#output-spec').fill('架空の検証用形式');await page.locator('#output-mode').selectOption('absolute');const imported=page.waitForEvent('download');await page.locator('#export-import').click();const importFile=await imported;assert.ok(importFile.suggestedFilename().startsWith('棚卸取込_'));const content=new TextDecoder('shift_jis').decode(require('node:fs').readFileSync(await importFile.path()));assert.ok(content.includes('000001,8\r\n'));assert.ok(content.includes('000003,0\r\n'));await idle();await page.reload();await idle();assert.equal(await page.locator('#output-mode').inputValue(),'absolute');
   await page.screenshot({path:path.join(dir,'screen.png'),fullPage:true});
   // A waiting tab acquires the workspace after the owning document closes.
   const next=await context.newPage();await next.goto(url);await next.waitForFunction(()=>document.querySelector('#save').disabled);

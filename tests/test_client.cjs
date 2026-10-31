@@ -1,7 +1,7 @@
 const test=require('node:test'),assert=require('node:assert/strict'),vm=require('node:vm'),fs=require('node:fs');
 function context(){
  const elements=new Map(),storage=new Map(),calls=[];
- const elem=id=>{if(!elements.has(id))elements.set(id,{value:'',textContent:'',disabled:false,replaceChildren(){},append(){}});return elements.get(id);};
+ const elem=id=>{if(!elements.has(id))elements.set(id,{value:'',textContent:'',disabled:false,replaceChildren(){},append(){},addEventListener(){}});return elements.get(id);};
  const session={id:'s',revision:0,locations:['A'],completed:[],records:[],items:[],summary:[],state:'counting',audit:[]};let fail=true;
  const ctx={document:{getElementById:elem,querySelectorAll:()=>[],createElement:()=>({append(){}})},localStorage:{getItem:k=>storage.get(k)||null,setItem:(k,v)=>storage.set(k,v),removeItem:k=>storage.delete(k)},crypto:{randomUUID:()=> 'stable-id'},AbortController,setTimeout,clearTimeout,Option:function(){},confirm:()=>true,prompt:()=>'',console,
  fetch:async(url,options)=>{if(options?.method==='POST'){calls.push(JSON.parse(options.body));if(fail)throw Error('lost response');return{ok:true,json:async()=>({id:'s'})};}return{ok:true,json:async()=>({sessions:[session],token:'new-token'})};}};
