@@ -27,3 +27,5 @@
 PC側のreceive操作は記録配列を一括受信する。各記録はid（UUID）、device、code、location、quantity（十進文字列）、operator、supersedes（訂正元ID配列）を持つ。操作全体に棚卸IDとrevisionを指定する。すべて検証した後に一括保存し、一件でも不正なら全件を取り消す。
 
 現在のHTTP操作はローカル試作用。実機の転送方式と切り離した論理契約であり、BT-W250への配布形式は未確定。棚卸の配布版、端末記録日時、チェックサム付き受領通知、未登録コード保留の仕様を実機方式決定時に追加する。
+
+実機なしの模擬実装と調査状況は[端末準備](handheld/preparation.md)、実機試験は[試験票](handheld/device-test-plan.md)を参照。

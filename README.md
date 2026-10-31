@@ -34,3 +34,5 @@ Python 3.12以上で `python -m inventory.server` を実行する。外部パッ
 ## 完成を判断する基準
 
 [完成判定表](docs/release-acceptance.md)のD01〜D07を確定し、A01〜A08をすべて満たして現場受入責任者が承認した時点をシステム完成とする。現在はPC試作段階。自動テスト成功やGitHubへのpushだけでは完成扱いにしない。
+
+[BT-W250の開発準備・PC模擬試験](docs/handheld/preparation.md)（SDKと端末向けビルドは確認待ち）
