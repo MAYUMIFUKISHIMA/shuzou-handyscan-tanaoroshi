@@ -5,6 +5,7 @@ function context(){
  const session={id:'s',revision:0,locations:['A'],completed:[],records:[],items:[],summary:[],state:'counting',audit:[]};let fail=true;
  const ctx={document:{getElementById:elem,querySelectorAll:()=>[],createElement:()=>({append(){}})},localStorage:{getItem:k=>storage.get(k)||null,setItem:(k,v)=>storage.set(k,v),removeItem:k=>storage.delete(k)},crypto:{randomUUID:()=> 'stable-id'},AbortController,setTimeout,clearTimeout,Option:function(){},confirm:()=>true,prompt:()=>'',console,
  fetch:async(url,options)=>{if(options?.method==='POST'){calls.push(JSON.parse(options.body));if(fail)throw Error('lost response');return{ok:true,json:async()=>({id:'s'})};}return{ok:true,json:async()=>({sessions:[session],token:'new-token'})};}};
+ ctx.navigator={locks:{request:(_name,fn)=>fn()}};
  vm.createContext(ctx);vm.runInContext(fs.readFileSync('inventory/app.js','utf8'),ctx);
  return{ctx,calls,storage,elem,recover:()=>{fail=false;}};
 }

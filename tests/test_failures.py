@@ -101,3 +101,14 @@ class FailureTests(unittest.TestCase):
         s=self.create();s=self.store.change(s['id'],0,'hold','test',dict(id='h',device='d',code='unknown',location='A',quantity='1',operator='t'))
         with self.assertRaises(ValueError):self.store.change(s['id'],1,'resolve','test',dict(id='h',reason='wrong',record={}))
         self.assertEqual(self.store.load(s['id'])['held'][0]['status'],'open')
+
+    def test_launcher_backup_and_restore(self):
+        from inventory.launcher import prepare
+        self.create();destination=Path(self.tmp.name)/'external'
+        saved=prepare(self.path,destination)
+        restored=Store(saved)
+        try:self.assertEqual(len(restored.list()),1)
+        finally:restored.close()
+        with patch('inventory.launcher.backup',side_effect=PermissionError('denied')):
+            with self.assertRaises(PermissionError):prepare(self.path,destination)
+        self.assertEqual(len(self.store.list()),1)

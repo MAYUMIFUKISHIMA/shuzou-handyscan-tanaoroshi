@@ -28,3 +28,5 @@ docs/skills.md                            skillの共有・導入方針
 Python 3.12以上で `python -m inventory.server` を実行する。外部パッケージのインストールは不要。
 
 [操作・テスト・制約](docs/prototype.md) / [CSV・実機確認票](docs/integration-checklist.md)
+
+[現場PC1台の起動・復元・ブラウザーテスト](docs/single-pc-operations.md)

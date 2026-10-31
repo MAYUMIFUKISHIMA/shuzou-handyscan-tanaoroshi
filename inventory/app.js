@@ -1,10 +1,11 @@
 const $=id=>document.getElementById(id);let sessions=[],token='',busy=false;let importData=null,previewKey=null;
+let ownsWorkspace=false;
 const current=()=>sessions.find(s=>s.id===$('session').value);
 function message(s){$('message').textContent=s;}
 async function refresh(selected){const data=await requestJSON('/api');sessions=data.sessions;token=data.token;const old=selected||$('session').value;$('session').replaceChildren(...sessions.map(s=>new Option(s.id.slice(0,8)+' / '+s.state,s.id)));if(sessions.some(s=>s.id===old))$('session').value=old;render();}
 function active(s,code,loc){const rs=s.records.filter(r=>r.code===code&&r.location===loc);const removed=new Set(rs.flatMap(r=>r.supersedes));return rs.filter(r=>!removed.has(r.id));}
 function product(){const s=current(),item=s?.items.find(i=>i.code===$('code').value);$('product').textContent=item?item.name+' / 現在の記録: '+active(s,item.code,$('location').value).map(r=>r.quantity+' ('+r.device+')').join(', '):'商品番号を読み取るか入力してください';}
-function render(){const s=current();$('held').replaceChildren(...(s?.held||[]).filter(x=>x.status==='open').map(x=>new Option(x.code+' / '+x.quantity+' / '+x.location,x.id)));const loc=$('location').value;$('location').replaceChildren(...(s?.locations||[]).map(x=>new Option(x,x)));if(s?.locations.includes(loc))$('location').value=loc;$('rows').replaceChildren();for(const r of s?.summary||[]){const tr=document.createElement('tr');for(const k of ['code','name','baseline','count','difference']){const td=document.createElement('td');td.textContent=r[k]??'未棚卸 / 競合';tr.append(td);}$('rows').append(tr);}$('state').textContent=s?`状態: ${s.state} / 完了区画: ${s.completed.join(', ')||'なし'}`:'棚卸を作成してください';$('audit').textContent=s?JSON.stringify({audit:s.audit,records:s.records,held:s.held,previous_results:s.previous_results},null,2):'';product();}
+function render(){const s=current();$('held').replaceChildren(...(s?.held||[]).filter(x=>x.status==='open').map(x=>new Option(x.code+' / '+x.quantity+' / '+x.location,x.id)));const loc=$('location').value;$('location').replaceChildren(...(s?.locations||[]).map(x=>new Option(x,x)));if(s?.locations.includes(loc))$('location').value=loc;$('rows').replaceChildren();const query=$('search').value.trim().toLowerCase(),filter=$('filter').value;const rows=(s?.summary||[]).filter(r=>(r.code+' '+r.name).toLowerCase().includes(query)).filter(r=>filter==='all'||(filter==='missing'&&r.count===null)||(filter==='difference'&&r.difference!==null&&Number(r.difference)!==0)||(filter==='held'&&(s.held||[]).some(h=>h.status==='open'&&h.code===r.code)));$('result-count').textContent=`${rows.length} / ${s?.items.length||0}件`;for(const r of rows){const tr=document.createElement('tr');for(const k of ['code','name','baseline','count','difference']){const td=document.createElement('td');td.textContent=r[k]??'未棚卸 / 競合';tr.append(td);}$('rows').append(tr);}$('state').textContent=s?`状態: ${s.state} / 完了区画: ${s.completed.join(', ')||'なし'}`:'棚卸を作成してください';$('audit').textContent=s?JSON.stringify({audit:s.audit,records:s.records,held:s.held,previous_results:s.previous_results},null,2):'';product();}
 const pendingKey='inventory.pending.v1';
 function pending(){const raw=localStorage.getItem(pendingKey);return raw?JSON.parse(raw):null;}
 async function requestJSON(url,options={}){
@@ -13,10 +14,11 @@ async function requestJSON(url,options={}){
   finally{clearTimeout(timer);}
 }
 async function sendPending(){
+  if(!ownsWorkspace)throw Error('別のタブで操作中です');
   const body=pending();if(!body)throw Error('再送する操作はありません');
   try{
     const result=await requestJSON('/api',{method:'POST',headers:{'Content-Type':'application/json','X-Token':token},body:JSON.stringify(body)});
-    await refresh(result.id);localStorage.removeItem(pendingKey);
+    await refresh(result.id);localStorage.removeItem(pendingKey);if(['receive','hold'].includes(body.action)){const record=body.action==='receive'?body.payload[0]:body.payload;localStorage.removeItem(draftKey(body.id,record.location));}
     if(['receive','hold'].includes(body.action)){$('quantity').value='';$('code').value='';product();}
     if(body.action==='create')invalidate();
     return current();
@@ -26,12 +28,13 @@ async function sendPending(){
   }
 }
 async function post(action,payload=null){
+  if(!ownsWorkspace)throw Error('別のタブで操作中です');
   if(pending())throw Error('未確認の操作があります。先に同じ操作を再送してください');
   const s=current();const body={action,request_id:crypto.randomUUID(),actor:$('actor').value,...(action==='create'?payload:{id:s?.id,revision:s?.revision,payload})};
   localStorage.setItem(pendingKey,JSON.stringify(body));return sendPending();
 }
-function controls(){const waiting=!!pending();document.querySelectorAll('button').forEach(b=>b.disabled=busy||(waiting&&!['retry','reload'].includes(b.id)));$('create').disabled=busy||waiting||!previewKey;document.querySelectorAll('input,select').forEach(e=>e.disabled=busy||waiting);$('pending-status').textContent=waiting?'未確認の送信があります。内容はこのブラウザーに保存されています。新規操作の前に再送してください。':'';}
-function bind(id,fn){$(id).onclick=async()=>{if(busy)return;busy=true;controls();message('');try{await fn();message('操作が完了しました');}catch(e){message(e.message);}finally{busy=false;controls();}};}
+function controls(){$('tab-status').textContent=ownsWorkspace?'このタブで操作できます':'ほかのタブを閉じると、このタブで操作できます';const waiting=!!pending();document.querySelectorAll('button').forEach(b=>b.disabled=!ownsWorkspace||busy||(waiting&&!['retry','reload'].includes(b.id)));$('create').disabled=!ownsWorkspace||busy||waiting||!previewKey;document.querySelectorAll('input,select').forEach(e=>e.disabled=!ownsWorkspace||busy||waiting);$('pending-status').textContent=waiting?'未確認の送信があります。内容はこのブラウザーに保存されています。新規操作の前に再送してください。':'';}
+function bind(id,fn){$(id).onclick=async()=>{if(busy||!ownsWorkspace)return;busy=true;controls();message('');try{await fn();message('操作が完了しました');}catch(e){message(e.message);}finally{busy=false;controls();}};}
 bind('retry',async()=>{await refresh();await sendPending();});
 bind('reload',()=>refresh());
 bind('reopen',async()=>{const reason=prompt('訂正理由を入力してください（出力前のみ）');if(reason)await post('reopen',{reason});});
@@ -39,7 +42,7 @@ function invalidate(){previewKey=null;$('create').disabled=true;$('preview-info'
 function mapping(){return {code:$('map-code').value,name:$('map-name').value,baseline:$('map-baseline').value};}
 function signature(){return JSON.stringify({data:importData,columns:mapping()});}
 async function importRequest(action,data){return requestJSON('/api',{method:'POST',headers:{'Content-Type':'application/json','X-Token':token},body:JSON.stringify({action,...data})});}
-bind('inspect',async()=>{invalidate();importData=null;$('mapping').hidden=true;const f=$('file').files[0];if(!f)throw Error('CSVを選択してください');if(f.size>1000000)throw Error('試作では1MB以内です');const encoding=$('encoding').value;let binary='';for(const byte of new Uint8Array(await f.arrayBuffer()))binary+=String.fromCharCode(byte);const data={csv:btoa(binary),encoding,source_name:f.name};const result=await importRequest('inspect',data);if(f!==$('file').files[0]||encoding!==$('encoding').value)throw Error('設定が変わりました。列を再読み込みしてください');importData=data;for(const [key,defaultName] of Object.entries({code:'商品番号',name:'名称',baseline:'数量'})){const select=$('map-'+key);select.replaceChildren(new Option('選択してください',''),...result.headers.map(h=>new Option(h,h)));if(result.headers.includes(defaultName))select.value=defaultName;}$('mapping').hidden=false;});
+bind('inspect',async()=>{invalidate();importData=null;$('mapping').hidden=true;const f=$('file').files[0];if(!f)throw Error('CSVを選択してください');if(f.size>1000000)throw Error('試作では1MB以内です');const encoding=$('encoding').value;let binary='';for(const byte of new Uint8Array(await f.arrayBuffer()))binary+=String.fromCharCode(byte);const data={csv:btoa(binary),encoding,source_name:f.name};const result=await importRequest('inspect',data);if(f!==$('file').files[0]||encoding!==$('encoding').value)throw Error('設定が変わりました。列を再読み込みしてください');importData=data;for(const [key,defaultName] of Object.entries({code:'商品番号',name:'名称',baseline:'数量'})){const select=$('map-'+key);select.replaceChildren(new Option('選択してください',''),...result.headers.map(h=>new Option(h,h)));if(result.headers.includes(defaultName))select.value=defaultName;}const profile=JSON.parse(localStorage.getItem('inventory.csv-profile.v1')||'null');if(profile&&profile.encoding===encoding&&Object.values(profile.columns).every(c=>result.headers.includes(c))){for(const key of ['code','name','baseline'])$('map-'+key).value=profile.columns[key];}$('mapping').hidden=false;});
 bind('preview',async()=>{invalidate();if(!importData)throw Error('列を読み込んでください');const key=signature();const result=await importRequest('preview',{...importData,columns:mapping()});if(key!==signature())throw Error('設定が変わりました。再検証してください');$('preview-info').textContent=`全${result.count}件を検証済み（先頭100件まで表示）`+(result.duplicates.length?'。注意：同じファイルの取り込み履歴があります。新しい棚卸として作成されます。':'');for(const item of result.items){const tr=document.createElement('tr');for(const field of ['code','name','baseline']){const td=document.createElement('td');td.textContent=item[field];tr.append(td);}$('preview-rows').append(tr);}previewKey=key;});
 bind('create',async()=>{if(!previewKey||previewKey!==signature())throw Error('取り込み前に全件検証してください');if(!confirm('表示内容を新しい棚卸として取り込みますか？'))return;await post('create',{...importData,columns:mapping(),locations:$('locations').value.split(',').map(x=>x.trim())});invalidate();});
 for(const id of ['file','encoding'])$(id).onchange=()=>{invalidate();importData=null;$('mapping').hidden=true;};
@@ -48,7 +51,24 @@ bind('save',async()=>{const s=current();if(!s)throw Error('棚卸を選択して
 bind('complete',()=>post('complete',{location:$('location').value}));
 bind('finalize',async()=>{if(confirm('確定後はこの棚卸を変更できません。確定しますか？'))await post('finalize');});
 bind('export',async()=>{const s=await post('export');const url=URL.createObjectURL(new Blob(['\ufeff',s.csv],{type:'text/csv;charset=utf-8'}));const a=document.createElement('a');a.href=url;a.download='確認用_'+s.id+'.csv';a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);});
-$('session').onchange=render;$('location').onchange=product;$('code').oninput=product;refresh().catch(e=>message(e.message)).finally(controls);
+const draftKey=(sid,loc)=>'inventory.draft.v1.'+sid+'.'+loc;
+function saveDraft(){if(!ownsWorkspace||busy||pending())return;try{const s=current();if(s)localStorage.setItem(draftKey(s.id,$('location').value),JSON.stringify({code:$('code').value,quantity:$('quantity').value}));localStorage.setItem('inventory.preferences.v1',JSON.stringify({session:$('session').value,location:$('location').value,actor:$('actor').value,device:$('device').value,locations:$('locations').value}));$('draft-status').textContent='入力をこのPCのブラウザーに保存しました';}catch(e){message('下書きを保存できません: '+e.message);}}
+function restoreDraft(){if(!ownsWorkspace)return;try{const s=current(),raw=s?localStorage.getItem(draftKey(s.id,$('location').value)):null;const draft=raw?JSON.parse(raw):{};$('code').value=draft.code||'';$('quantity').value=draft.quantity||'';$('draft-status').textContent=raw?'保存した下書きを復元しました':'';product();}catch(e){message('下書きを復元できません: '+e.message);}}
+$('session').onchange=()=>{render();restoreDraft();saveDraft();};$('location').onchange=()=>{restoreDraft();saveDraft();};
+for(const id of ['code','quantity','actor','device','locations'])$(id).oninput=()=>{product();saveDraft();};
+$('search').oninput=render;$('filter').onchange=render;
+bind('save-profile',async()=>{if(!previewKey)throw Error('全件検証後に保存してください');localStorage.setItem('inventory.csv-profile.v1',JSON.stringify({encoding:importData.encoding,columns:mapping()}));});
+bind('discard-draft',async()=>{if(confirm('この区画の入力途中の下書きを削除しますか？')){const s=current();if(s)localStorage.removeItem(draftKey(s.id,$('location').value));$('code').value='';$('quantity').value='';$('draft-status').textContent='';product();}});
+async function start(){
+ await refresh();controls();
+ if(!globalThis.navigator?.locks){message('このブラウザーは複数タブ制御に未対応です。最新のChromeまたはEdgeを使用してください');return;}
+ navigator.locks.request('inventory-workspace-v1',async()=>{
+  ownsWorkspace=true;
+  try{await refresh();const prefs=JSON.parse(localStorage.getItem('inventory.preferences.v1')||'{}');for(const id of ['actor','device','locations'])if(typeof prefs[id]==='string')$(id).value=prefs[id];if(sessions.some(s=>s.id===prefs.session))$('session').value=prefs.session;render();if(current()?.locations.includes(prefs.location))$('location').value=prefs.location;restoreDraft();controls();}catch(e){message(e.message);controls();}
+  await new Promise(()=>{});
+ });
+}
+start().catch(e=>message(e.message));
 
 bind('resolve',async()=>{const s=current(),held=s?.held?.find(x=>x.id===$('held').value);if(!held)throw Error('保留を選択してください');const code=$('code').value;const rs=active(s,code,held.location);if(rs.length)throw Error('この商品の区画には既に記録があります。履歴確認後に保留を除外し、通常の訂正を行ってください');const reason=prompt('照合した根拠を入力してください');if(reason)await post('resolve',{id:held.id,reason,record:{id:crypto.randomUUID(),code,location:held.location,quantity:held.quantity,device:held.device,operator:$('actor').value,supersedes:[]}});});
 bind('dismiss',async()=>{if(!$('held').value)throw Error('保留を選択してください');const reason=prompt('保留を除外する理由を入力してください');if(reason)await post('dismiss',{id:$('held').value,reason});});
