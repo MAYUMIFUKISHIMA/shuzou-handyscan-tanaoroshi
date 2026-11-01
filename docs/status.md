@@ -82,3 +82,7 @@ V1は「売りex CSVから対象取り込み → PCで検証 → 中継機器経
 現場PCのPnP一覧にKEYENCE BT-UC6U (COM3)とA/Bが正常認識されている。USB通信ユニットは存在し、i3Edge共有の接続失敗とは別経路として扱う。ハンディ側USBメニューの停止注意は解除しない。機器の対応・使用ソフトは確認待ち。
 
 手元の同型台座の写真でBT-WUC8Uと電源/USB B/USB A端子を確認。写真の個体は電源のみ。現場PCのBT-UC6U(COM3)表示との対応は未確認で、現場側の配線と混同しない。
+
+## 台座・FLIRC機器の公式構成調査
+
+KEYENCE/FLIRCの製品ページは実行環境の通信制限で未取得。既存許可先を保ち、公式サイト3ドメインの設定下書きを保存したが未適用・未公開。FLIRC公式GitHubのSDKはIR向けFlirc USBで、現場の箱と同一とは判断できない。USB台座と学研FTP/共有経路を区別し、公式な接続仕様の確定は保留。[調査記録](handheld/official-communication-research.md)。
