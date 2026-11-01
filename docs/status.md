@@ -24,7 +24,7 @@
 
 ## 検証結果
 
-- `python -m unittest discover -s tests -v`: 全55件成功（HTTPを含む）。
+- `python -m unittest discover -s tests -v`: 全57件成功（HTTPを含む）。
 - `node --check inventory/app.js`: 成功。
 - `node tests/test_client.cjs`: 2件成功（通信失敗の同一再送、保存不可時の送信停止）。
 - 通常の制限付き実行ではソケット作成が拒否されたが、許可された実行でHTTP結合テストが成功した。
@@ -86,3 +86,7 @@ V1は「売りex CSVから対象取り込み → PCで検証 → 中継機器経
 ## 台座・FLIRC機器の公式構成調査
 
 KEYENCE/FLIRCの製品ページは実行環境の通信制限で未取得。既存許可先を保ち、公式サイト3ドメインの設定下書きを保存したが未適用・未公開。FLIRC公式GitHubのSDKはIR向けFlirc USBで、現場の箱と同一とは判断できない。USB台座と学研FTP/共有経路を区別し、公式な接続仕様の確定は保留。[調査記録](handheld/official-communication-research.md)。
+
+## 実投入TXTと試験ファイル
+
+INDEX（7件/4列）、KENPIN（11明細/18列）を観測形式で検証。架空4商品と開始キーの試験一式、ラベル、構造検証と再生成コードを追加。実機未受理・転送未実施であり、棚卸V1の完成ではない。[手順と制約](handheld/actual-tsv-trial.md)。原本はGitへ入れない。

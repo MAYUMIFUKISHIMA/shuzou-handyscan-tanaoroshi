@@ -1,0 +1,41 @@
+{
+  "purpose": "synthetic_compatibility_test_not_production",
+  "hardware_verified": false,
+  "transfer_included": false,
+  "scenarios": [
+    {
+      "start_key": "99001",
+      "code": "TST00001",
+      "planned": "10",
+      "actual": "8",
+      "check": "予定10に対し実数8。可能なら7へ訂正"
+    },
+    {
+      "start_key": "99002",
+      "code": "TST00002",
+      "planned": "10",
+      "actual": "12",
+      "check": "予定超過12"
+    },
+    {
+      "start_key": "99003",
+      "code": "TST00003",
+      "planned": "10",
+      "actual": "0",
+      "check": "実数ゼロ"
+    },
+    {
+      "start_key": "99004",
+      "code": "TST00004",
+      "planned": "10",
+      "actual": null,
+      "check": "未読取・未棚卸"
+    }
+  ],
+  "sha256": {
+    "INDEX.TXT": "f06e017175c99408e9034d61ae5b159d8200ff983b566947c8e543f583bba9e6",
+    "KENPIN.TXT": "074701e755b30d7fbb9f38a24f1efb6ac6f570ede743b194997f7b1b71fe2ed3",
+    "labels.html": "6728346052182aa95c20c6ef92748bedf990dc3341fd2144f92896a04bb9988c",
+    "README.txt": "9360e19defe6235fbf6b7df9b69b85a804f941a41a65f68ddc7e1261f33f8a97"
+  }
+}

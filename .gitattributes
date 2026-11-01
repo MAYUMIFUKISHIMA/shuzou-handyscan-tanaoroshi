@@ -1,0 +1,2 @@
+# Preserve the device fixture's CP932 bytes and CRLF exactly.
+fixtures/gakken-trial/*.TXT -text -diff
