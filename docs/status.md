@@ -78,3 +78,5 @@ V1は「売りex CSVから対象取り込み → PCで検証 → 中継機器経
 ## 学研v7/v6本体解析
 
 開始キーは伝票番号。最終投入はShift-JIS指定TSVのKENPIN.TXT（18列）とINDEX.TXT（4列）。PC側設定はv7がi3Edge共有MSTへ配置、v6がedgeLinksモードで共有RESから実績集約。現場マニュアルのハンディ操作はFTP。実績集約は元ファイルをbkへ移動するため、調査はコピーを使用する。任意実数入力・実績数量の意味は未確定。[詳細](handheld/gakken-v7-v6-analysis.md)。原本とVBAは実行・変更していない。
+
+現場PCのPnP一覧にKEYENCE BT-UC6U (COM3)とA/Bが正常認識されている。USB通信ユニットは存在し、i3Edge共有の接続失敗とは別経路として扱う。ハンディ側USBメニューの停止注意は解除しない。機器の対応・使用ソフトは確認待ち。
