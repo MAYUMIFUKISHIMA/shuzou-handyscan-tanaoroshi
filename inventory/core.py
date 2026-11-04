@@ -170,6 +170,21 @@ class Store:
                 raise ValueError('別の操作で更新されています。再読込してください')
             if action == 'receive':
                 self._receive(s, payload)
+            elif action == 'resolve_conflict':
+                if not isinstance(payload, dict) or set(payload) != {'reason', 'record'}:
+                    raise ValueError('競合解決には理由と記録が必要です')
+                text(payload['reason'], '確認・再計数の理由', 512)
+                record = payload['record']
+                if not isinstance(record, dict):
+                    raise ValueError('競合解決の記録が不正です')
+                if not isinstance(record.get('supersedes'), list) or any(not isinstance(x, str) for x in record['supersedes']):
+                    raise ValueError('競合候補IDは文字列の配列が必要です')
+                active = self.active(s, record.get('code'), record.get('location'))
+                if len(active) < 2:
+                    raise ValueError('複数の採用候補がある競合を選択してください')
+                if set(record.get('supersedes', [])) != {r['id'] for r in active}:
+                    raise ValueError('競合候補が変わっています。再確認してください')
+                self._receive(s, [record])
             elif action == 'hold':
                 self._editable(s)
                 required = {'id','device','code','location','quantity','operator'}
@@ -270,7 +285,11 @@ class Store:
             else:
                 raise ValueError('未対応の操作です')
             s['revision'] += 1
-            s['audit'].append(dict(action=action, actor=actor, time=now()))
+            event = dict(action=action, actor=actor, time=now())
+            if action == 'resolve_conflict':
+                event.update(reason=payload['reason'], record_id=record['id'],
+                             supersedes=record['supersedes'], code=record['code'], location=record['location'])
+            s['audit'].append(event)
             self.db.execute('UPDATE sessions SET body=? WHERE id=?', (json.dumps(s, ensure_ascii=False), sid))
         return s
 
